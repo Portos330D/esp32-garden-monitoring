@@ -145,7 +145,8 @@ switch:
       - ble.enable:
     turn_off_action:
       - ble.disable:
-    restore_mode: ALWAYS_OFF ```
+    restore_mode: ALWAYS_OFF
+```
 
 🎯 Calibration du débitmètre (méthode générique)
 
