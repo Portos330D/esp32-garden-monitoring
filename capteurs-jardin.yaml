@@ -1,1 +1,203 @@
+#############################################
+# 🌿 ESP32 – Capteurs Jardin (Temp, Humidité, Débit)
+# Version générique – Adaptable à toute installation
+#############################################
+
+esphome:
+  name: capteurs-jardin
+  friendly_name: Capteurs Jardin
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# -----------------------------
+# 📡 Connexion Wi-Fi + API
+# -----------------------------
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+api:
+
+ota:
+
+logger:
+  level: DEBUG
+
+web_server:
+  port: 80
+
+# -----------------------------
+# 🔌 Switch pour activer/désactiver le Bluetooth
+# -----------------------------
+switch:
+  - platform: template
+    name: "Bluetooth ESP32 Jardin"
+    id: bt_switch
+    restore_mode: ALWAYS_OFF
+    optimistic: true
+    turn_on_action:
+      - esp32_ble_tracker.start_scan:
+    turn_off_action:
+      - esp32_ble_tracker.stop_scan:
+
+# Bluetooth désactivé par défaut pour économiser des ressources
+esp32_ble_tracker:
+  scan_parameters:
+    duration: 300s
+    active: true
+
+
+# ==========================================================
+# 🌡️ 1. SONDES DE TEMPÉRATURE (DS18B20)
+# ==========================================================
+one_wire:
+  - pin: GPIO4
+
+dallas_temp:
+  update_interval: 60s
+
+sensor:
+  # --------------------------
+  # Température Extérieure
+  # --------------------------
+  - platform: dallas_temp
+    name: "Température Extérieure"
+    address: 0x020000006ee80c28
+    accuracy_decimals: 1
+
+  # --------------------------
+  # Température Sol
+  # --------------------------
+  - platform: dallas_temp
+    name: "Température Sol"
+    address: 0xa922a1bf0a646128
+    accuracy_decimals: 1
+
+  # --------------------------
+  # Température Eau Cuve
+  # --------------------------
+  - platform: dallas_temp
+    name: "Température Eau Cuve"
+    address: 0x8397be691f64ff28
+    accuracy_decimals: 1
+
+
+# ==========================================================
+# 🌱 2. HUMIDITÉ DU SOL (ADC)
+# ==========================================================
+# ⚠️ Calibration à adapter selon votre installation :
+# - Mesurer tension sol sec → tension_sec
+# - Mesurer tension sol 100% humide → tension_humide
+# - Formule utilisée :
+#   (v - tension_humide) * 100 / (tension_sec - tension_humide)
+# Exemple générique : tension_sec = 3.3V, tension_humide = 0V
+# ==========================================================
+
+  - platform: adc
+    pin: GPIO34
+    name: "Humidité du sol brut"
+    id: humidite_brut
+    update_interval: 10s
+    attenuation: 12db
+
+  - platform: template
+    name: "Humidité du sol (%)"
+    id: humidite_sol
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: |-
+      float v = id(humidite_brut).state;
+
+      // Valeurs par défaut (à adapter) :
+      float tension_sec = 3.30;
+      float tension_humide = 0.00;
+
+      if (v <= tension_humide) return 100.0;
+      if (v >= tension_sec) return 0.0;
+
+      return (v - tension_humide) * 100.0 / (tension_sec - tension_humide);
+
+
+# ==========================================================
+# 💧 3. DÉBITMÈTRE (Pulse Meter)
+# ==========================================================
+# Générique : entrée pulse → L/min + volume total
+# Calibration :
+#  pulses_par_litre = pulses_mesurés / litres réels
+# ==========================================================
+
+  - platform: pulse_meter
+    pin:
+      number: GPIO27
+      mode: INPUT_PULLUP
+    name: "Débitmètre Jardin (pulses/min)"
+    id: pulse_jardin
+    internal_filter: 100us
+    timeout: 5s
+    accuracy_decimals: 0
+    total:
+      name: "Volume Jardin Total brut"
+      id: pulse_jardin_total
+      unit_of_measurement: "pulses"
+      accuracy_decimals: 0
+
+  # Nombre de pulses par litre → réglable via Home Assistant
+number:
+  - platform: template
+    name: "Impulsions/Litre Jardin"
+    id: ppl_jardin
+    optimistic: true
+    restore_value: true
+    min_value: 200
+    max_value: 1200
+    step: 1
+    unit_of_measurement: "pulses/L"
+    initial_value: 300  # valeur générique
+
+
+# -----------------------------
+# Débit L/min (moyenné pour éviter les sauts)
+# -----------------------------
+  - platform: template
+    name: "Débit Jardin"
+    id: debit_jardin
+    unit_of_measurement: "L/min"
+    accuracy_decimals: 2
+    update_interval: 3s
+    filters:
+      - sliding_window_moving_average:
+          window_size: 3
+          send_every: 1
+    lambda: |-
+      if (id(pulse_jardin).state == 0 || id(ppl_jardin).state == 0) return 0.0;
+      return id(pulse_jardin).state / id(ppl_jardin).state;
+
+# -----------------------------
+# Volume total converti en litres
+# -----------------------------
+  - platform: template
+    name: "Volume Jardin Total (L)"
+    id: volume_jardin
+    unit_of_measurement: "L"
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      if (id(ppl_jardin).state == 0) return 0.0;
+      return id(pulse_jardin_total).state / id(ppl_jardin).state;
+
+
+# ==========================================================
+# 🔁 Bouton Reset volume total
+# ==========================================================
+button:
+  - platform: template
+    name: "🔁 Reset Volume Débitmètre"
+    on_press:
+      - lambda: |-
+          id(pulse_jardin_total).publish_state(0);
 
