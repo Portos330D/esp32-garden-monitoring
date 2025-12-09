@@ -1,1 +1,194 @@
+###############################################################################
+# 📦 PLUVIOMÈTRE – Système complet basé sur capteur à bascule (Rain Gauge)
+# Version générique – compatible GitHub
+# À adapter selon vos entités et votre installation.
+###############################################################################
+
+###############################
+# ⚙️ Utility Meters (cycle jour / semaine / mois / année)
+###############################
+utility_meter:
+  pluie_journaliere:
+    source: sensor.pluviometre_bascules
+    cycle: daily
+    name: "🌧️ Pluie aujourd'hui"
+    unique_id: pluie_journaliere_mm
+
+  pluie_cette_semaine:
+    source: sensor.pluviometre_bascules
+    cycle: weekly
+    name: "🌦️ Pluie cette semaine"
+    unique_id: pluie_cette_semaine_mm
+
+  pluie_ce_mois:
+    source: sensor.pluviometre_bascules
+    cycle: monthly
+    name: "🌧️ Pluie ce mois-ci"
+    unique_id: pluie_ce_mois_mm
+
+  pluie_cette_annee:
+    source: sensor.pluviometre_bascules
+    cycle: yearly
+    name: "☔ Pluie cette année"
+    unique_id: pluie_cette_annee_mm
+
+
+###############################
+# 📊 Nombre de bascules (calcul sur 24h)
+###############################
+sensor:
+  - platform: history_stats
+    name: "Pluviomètre bascules"
+    unique_id: pluviometre_bascules
+    entity_id: binary_sensor.pluviometre_contact   # <-- entité contact générique
+    state: "off"
+    type: count
+    start: "{{ now().replace(hour=0, minute=0, second=0, microsecond=0) }}"
+    end: "{{ now() }}"
+
+###############################
+# 💧 Conversion des bascules → mm
+###############################
+  - name: "🌧️ Pluie aujourd'hui (mm)"
+    unique_id: pluie_aujourdhui_mm
+    unit_of_measurement: "mm"
+    device_class: precipitation
+    state_class: total_increasing
+    state: >-
+      {% set count = states('sensor.pluviometre_bascules') | float(0) %}
+      {{ (count * 0.30303) | round(1, 'floor') }}
+    availability: "{{ states('sensor.pluviometre_bascules') not in ['unknown','unavailable'] }}"
+
+  - name: "🌦️ Pluie cette semaine (mm)"
+    unique_id: pluie_semaine_mm
+    unit_of_measurement: "mm"
+    device_class: precipitation
+    state: >-
+      {% set count = states('sensor.pluie_cette_semaine') | float(0) %}
+      {{ (count * 0.30303) | round(1) }}
+
+  - name: "🌧️ Pluie ce mois-ci (mm)"
+    unique_id: pluie_mois_mm
+    unit_of_measurement: "mm"
+    device_class: precipitation
+    state: >-
+      {% set count = states('sensor.pluie_ce_mois') | float(0) %}
+      {{ (count * 0.30303) | round(1) }}
+
+  - name: "☔ Pluie cette année (mm)"
+    unique_id: pluie_annee_mm
+    unit_of_measurement: "mm"
+    device_class: precipitation
+    state: >-
+      {% set count = states('sensor.pluie_cette_annee') | float(0) %}
+      {{ (count * 0.30303) | round(1) }}
+
+
+###############################
+# 📈 Intensité de pluie (mm/h)
+###############################
+template:
+  - trigger:
+      - platform: state
+        entity_id: sensor.pluie_aujourdhui_mm
+      - platform: time_pattern
+        minutes: "/5"
+
+    sensor:
+      - name: "💧 Intensité de pluie"
+        unique_id: intensite_pluie_mm_h
+        unit_of_measurement: "mm/h"
+        device_class: precipitation_intensity
+        state_class: measurement
+        state: >-
+          {% set current = states('sensor.pluie_aujourdhui_mm') | float(0) %}
+          {% set last_state = state_attr('sensor.intensite_de_pluie', 'last_state') | float(0) %}
+          {% set last_time = state_attr('sensor.intensite_de_pluie', 'last_time') | default(now().timestamp() - 300) | float(0) %}
+          {% set delta_t = now().timestamp() - last_time %}
+          {% set diff = current - last_state %}
+
+          {% if diff > 0 and delta_t > 0 %}
+            {{ (diff / delta_t * 3600) | round(2) }}
+          {% elif (now().timestamp() - last_time) > 600 %}
+            0
+          {% else %}
+            {{ this.state | float(0) }}
+          {% endif %}
+
+        attributes:
+          last_state: "{{ states('sensor.pluie_aujourdhui_mm') }}"
+          last_time: "{{ now().timestamp() }}"
+
+
+###############################
+# 📉 Tendance de pluie (hausse / baisse)
+###############################
+trend:
+  sensors:
+    pluie_tendance:
+      entity_id: sensor.pluie_aujourdhui_mm
+      max_samples: 2
+      sample_duration: 300
+      min_gradient: 0.0001
+      device_class: moisture
+      unique_id: pluie_tendance_generic
+
+###############################
+# ✔️ Tendance corrigée (pas de pluie = OFF)
+###############################
+template:
+  - trigger:
+      - platform: state
+        entity_id: sensor.pluie_aujourdhui_mm
+      - platform: time_pattern
+        minutes: "/1"
+
+    binary_sensor:
+      - name: "📊 Tendance pluie corrigée"
+        unique_id: pluie_tendance_corrigee_generic
+        device_class: moisture
+        state: >-
+          {% set last = as_timestamp(states.sensor.pluie_aujourdhui_mm.last_changed, 0) %}
+          {% if (now().timestamp() - last) > 600 %}
+            off
+          {% else %}
+            {{ states('binary_sensor.pluie_tendance') }}
+          {% endif %}
+
+
+###############################
+# 🌧️ Type de pluie (texte + icône)
+###############################
+template:
+  - sensor:
+      - name: "🌧️ Type de pluie"
+        unique_id: type_de_pluie_generic
+        state: >-
+          {% set i = states('sensor.intensite_de_pluie') | float(0) %}
+          {% if i == 0 %}
+            Aucune pluie
+          {% elif i < 1 %}
+            Pluie faible
+          {% elif i < 4 %}
+            Pluie modérée
+          {% elif i < 10 %}
+            Pluie forte
+          {% elif i < 30 %}
+            Pluie très forte
+          {% else %}
+            Pluie torrentielle
+          {% endif %}
+        icon: >-
+          {% set i = states('sensor.intensite_de_pluie') | float(0) %}
+          {% if i == 0 %}
+            mdi:weather-sunny
+          {% elif i < 1 %}
+            mdi:weather-partly-rainy
+          {% elif i < 4 %}
+            mdi:weather-rainy
+          {% elif i < 10 %}
+            mdi:weather-pouring
+          {% else %}
+            mdi:weather-lightning-rainy
+          {% endif %}
 
