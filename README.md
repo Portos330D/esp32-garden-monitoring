@@ -10,21 +10,20 @@ Il permet de mesurer :
 
 Le code est basé sur **ESPHome**.
 
----
-
-## 🔧 Matériel recommandé & liens
+--- 
+## 🔧 Matériel recommandé & liens    Sonde d’humidité de sol (analogique)
 
 Voici des exemples de matériel utilisé pour ce projet — libre à vous d’adapter en fonction de vos capteurs ou de votre fournisseur :
 
 | Matériel / usage | Lien / Référence |
 |------------------|------------------|
-| Capteur DS18B20 étanche (température) | https://a.aliexpress.com/_Ew5A44U |
-| Sonde d’humidité de sol (analogique) | https://a.aliexpress.com/_EHGbenE |
-| Débitmètre (pulse meter) pour arrosage / pompe | https://a.aliexpress.com/_EG2qenS |
-| Résistances, câbles, composants passifs | https://a.aliexpress.com/_Ey54Ir2 / https://a.aliexpress.com/_EzdSZI4 |
-| Platine / support prototype pour ESP32 | https://a.aliexpress.com/_EzNLtpi |
-| ESP32 DevKit ou module de base | https://a.aliexpress.com/_ExRe2iY |
-| Accessoires divers (protège-câbles, gaines, etc.) | https://a.aliexpress.com/_EHnzeVI |
+| Débitmètre (pulse meter) pour arrosage / pompe | https://a.aliexpress.com/_Ew5A44U |
+| Capteur DS18B20 étanche (température) | https://a.aliexpress.com/_EHGbenE |
+| ESP32 DevKit ou module de base | https://a.aliexpress.com/_EG2qenS |
+| Résistances, câbles, composants passifs | https://a.aliexpress.com/_EzdSZI4 , https://a.aliexpress.com/_EzNLtpi |
+| Platine / support prototype pour ESP32 | https://a.aliexpress.com/_Ey54Ir2 |
+| Sonde d’humidité de sol (analogique) | https://a.aliexpress.com/_ExRe2iY |
+| Capteur de niveau de cuve Zigbee | https://a.aliexpress.com/_EHnzeVI |
 | Support 3D / Abri météo (Stevenson Screen) pour capteurs extérieurs | https://makerworld.com/fr/models/936490-universal-stevenson-screen-temperature-humidy |
 
 > 💡 **Note** : Le “Stevenson Screen” (abri météo) est utilisé pour protéger les sondes de température et d’humidité extérieure contre le soleil, la pluie et les radiations, tout en permettant une bonne circulation d’air — il améliore la précision des mesures en conditions réelles. 2
