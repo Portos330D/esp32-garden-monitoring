@@ -1,1 +1,408 @@
+###############################################################################
+# 🌿 AUTOMATISATIONS ARROSAGE INTELLIGENT — VERSION GÉNÉRIQUE POUR GITHUB
+# ---------------------------------------------------------------------------
+# Ce fichier regroupe 5 automatisations :
+# 1) Arrosage intelligent (PRO)
+# 2) Sécurité : débit nul / niveau bas / arrêt manuel
+# 3) Arrêt général
+# 4) Arrosage manuel (volume réel)
+# 5) Sécurité trop-plein cuve
+#
+# ❗ Les utilisateurs doivent adapter leurs entités :
+# capteurs
+#  - sensor.soil_humidity
+#  - sensor.soil_temperature
+#  - sensor.air_temperature
+#  - sensor.rain_today
+#  - sensor.uv_index
+#  - sensor.tank_level_percent
+#  - sensor.flow_rate
+#  - sensor.water_usage_total
+#
+# actionneurs
+#  - switch.irrigation_zone_1
+#  - switch.irrigation_zone_2
+#  - switch.irrigation_pump
+#
+# input
+#  - input_select.irrigation_mode
+#  - input_select.manual_zone
+#  - input_number.manual_duration
+#  - input_boolean.manual_irrigation
+#  - input_boolean.irrigation_stop
+#
+###############################################################################
+
+
+###############################################################################
+# 1️⃣ ARROSAGE INTELLIGENT — MODE PRO
+###############################################################################
+- id: irrigation_intelligent_pro
+  alias: "💦 Irrigation intelligente – Mode PRO"
+  description: >
+    Arrosage automatique basé sur humidité du sol, pluie, températures,
+    UV, niveau de cuve et mode sélectionné. Calcul dynamique du volume.
+
+  trigger:
+    - platform: sun
+      event: sunrise
+      offset: "-00:45:00"
+
+  action:
+    - variables:
+        surface_m2: 20
+        soil_humidity: "{{ states('sensor.soil_humidity') | float(0) }}"
+        soil_temp: "{{ states('sensor.soil_temperature') | float(0) }}"
+        air_temp: "{{ states('sensor.air_temperature') | float(0) }}"
+        rain_today: "{{ states('sensor.rain_today') | float(0) }}"
+        tank_level: "{{ states('sensor.tank_level_percent') | float(0) }}"
+        uv: "{{ states('sensor.uv_index') | float(0) }}"
+        mode: "{{ states('input_select.irrigation_mode') }}"
+
+        base_l_m2: |
+          {% if mode == 'Off' %}
+            0
+          {% elif mode == 'Eco' %}
+            5
+          {% elif mode == 'Normal' %}
+            8
+          {% elif mode == 'Boost' %}
+            12
+          {% endif %}
+
+        ajust_humidity: |
+          {% if soil_humidity < 25 %}
+            1.4
+          {% elif soil_humidity < 40 %}
+            1.0
+          {% elif soil_humidity < 60 %}
+            0.6
+          {% else %}
+            0
+          {% endif %}
+
+        ajust_rain: |
+          {% if rain_today > 5 %}
+            0
+          {% elif rain_today > 2 %}
+            0.3
+          {% else %}
+            1
+          {% endif %}
+
+        ajust_temp: >
+          {% set f = 1 %}
+          {% if soil_temp > 30 %}{% set f = f * 1.2 %}{% endif %}
+          {% if air_temp > 30 %}{% set f = f * 1.2 %}{% endif %}
+          {{ f }}
+
+        ajust_tank: |
+          {% if tank_level < 15 %}
+            0
+          {% elif tank_level < 30 %}
+            0.4
+          {% elif tank_level < 50 %}
+            0.7
+          {% elif tank_level > 80 %}
+            1.2
+          {% else %}
+            1
+          {% endif %}
+
+        final_l_m2: "{{ base_l_m2 * ajust_humidity * ajust_rain * ajust_temp * ajust_tank }}"
+        total_liters: "{{ (final_l_m2 * surface_m2) | round(1) }}"
+
+    # 🚫 CONDITIONS INSUFFISANTES
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ total_liters | float(0) <= 0 }}"
+          sequence:
+            - service: notify.mobile_app
+              data:
+                message: |
+                  🚫 *Arrosage annulé — conditions insuffisantes*
+                  Humidité : {{ soil_humidity }} %
+                  Pluie : {{ rain_today }} mm
+                  Cuve : {{ tank_level }} %
+                  Temp sol : {{ soil_temp }} °C
+                  Mode : {{ mode }}
+            - stop: "Arrosage annulé"
+
+    # 📊 DÉBUT — MESURE VOLUME RÉEL
+    - variables:
+        vol_initial: "{{ states('sensor.water_usage_total') | float(0) }}"
+
+    # 🌿 ACTIVATION
+    - service: switch.turn_on
+      target:
+        entity_id: switch.irrigation_zone_1
+
+    - service: switch.turn_on
+      target:
+        entity_id: switch.irrigation_pump
+
+    # boucle — arrêt quand volume atteint
+    - repeat:
+        while:
+          - condition: template
+            value_template: >
+              {{
+                (states('sensor.water_usage_total') | float(0))
+                - vol_initial < total_liters
+              }}
+        sequence:
+          - delay: "00:00:10"
+
+          # sécurité débit nul
+          - choose:
+              - conditions:
+                  - condition: numeric_state
+                    entity_id: sensor.flow_rate
+                    below: 0.1
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: switch.irrigation_pump
+                  - service: switch.turn_off
+                    target:
+                      entity_id: switch.irrigation_zone_1
+                  - service: notify.mobile_app
+                    data:
+                      message: "❌ Arrosage stoppé — débit nul détecté"
+                  - stop: "Débit nul"
+
+    # 📴 ARRÊT
+    - service: switch.turn_off
+      target:
+        entity_id: switch.irrigation_pump
+
+    - delay: 2
+
+    - service: switch.turn_off
+      target:
+        entity_id: switch.irrigation_zone_1
+
+    # 📊 FIN — CALCUL VOLUME
+    - variables:
+        vol_final: "{{ states('sensor.water_usage_total') | float(0) }}"
+        vol_reel: "{{ (vol_final - vol_initial) | round(1) }}"
+
+    - service: notify.mobile_app
+      data:
+        message: |
+          ✅ *Arrosage intelligent terminé (Mode PRO)*  
+          💧 Volume réel : {{ vol_reel }} L  
+          🎯 Prévu : {{ total_liters }} L  
+          🌱 Humidité : {{ soil_humidity }} %  
+          🌦 Pluie : {{ rain_today }} mm  
+          🛢 Cuve : {{ tank_level }} %
+
+
+###############################################################################
+# 2️⃣ SÉCURITÉ : DÉBIT NUL / NIVEAU BAS / ARRÊT MANUEL
+###############################################################################
+- id: irrigation_security
+  alias: "🔴 Sécurité Irrigation"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.flow_rate
+      below: 0.2
+      for: "00:00:10"
+
+    - platform: numeric_state
+      entity_id: sensor.tank_level_percent
+      below: 10
+
+    - platform: state
+      entity_id: input_boolean.irrigation_stop
+      to: "on"
+
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id:
+          - switch.irrigation_pump
+          - switch.irrigation_zone_1
+          - switch.irrigation_zone_2
+
+    - service: notify.mobile_app
+      data:
+        message: |
+          🔴 *Sécurité Irrigation activée*
+          Débit : {{ states('sensor.flow_rate') }} L/min
+          Niveau : {{ states('sensor.tank_level_percent') }} %
+          Tous les actionneurs ont été stoppés.
+
+
+###############################################################################
+# 3️⃣ ARRÊT GÉNÉRAL IRRIGATION
+###############################################################################
+- id: irrigation_global_stop
+  alias: "🛑 Arrêt général Irrigation"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.irrigation_stop
+      to: "on"
+
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id:
+          - switch.irrigation_zone_1
+          - switch.irrigation_zone_2
+          - switch.irrigation_pump
+
+    - delay: "00:00:02"
+
+    - service: notify.mobile_app
+      data:
+        message: |
+          🛑 *Arrêt général Irrigation activé*
+          Toutes les vannes et la pompe sont coupées.
+
+
+###############################################################################
+# 4️⃣ ARROSAGE MANUEL — VOLUME RÉEL
+###############################################################################
+- id: irrigation_manual
+  alias: "💧 Arrosage manuel (volume réel)"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.manual_irrigation
+      to: "on"
+
+  action:
+    - variables:
+        zone: "{{ states('input_select.manual_zone') }}"
+        duration_sec: "{{ (states('input_number.manual_duration') | float(0) * 60) | int }}"
+        vol_initial: "{{ states('sensor.water_usage_total') | float(0) }}"
+
+    # ouverture zone
+    - choose:
+        - conditions: "{{ zone == 'Zone 1' }}"
+          sequence:
+            - service: switch.turn_on
+              target:
+                entity_id: switch.irrigation_zone_1
+
+        - conditions: "{{ zone == 'Zone 2' }}"
+          sequence:
+            - service: switch.turn_on
+              target:
+                entity_id: switch.irrigation_zone_2
+
+    - service: switch.turn_on
+      target:
+        entity_id: switch.irrigation_pump
+
+    - delay:
+        seconds: "{{ duration_sec }}"
+
+    # arrêt
+    - service: switch.turn_off
+      target:
+        entity_id: switch.irrigation_pump
+
+    - delay: 1
+
+    - choose:
+        - conditions: "{{ zone == 'Zone 1' }}"
+          sequence:
+            - service: switch.turn_off
+              target:
+                entity_id: switch.irrigation_zone_1
+
+        - conditions: "{{ zone == 'Zone 2' }}"
+          sequence:
+            - service: switch.turn_off
+              target:
+                entity_id: switch.irrigation_zone_2
+
+    - variables:
+        vol_final: "{{ states('sensor.water_usage_total') | float(0) }}"
+        vol_reel: "{{ (vol_final - vol_initial) | round(1) }}"
+
+    - service: notify.mobile_app
+      data:
+        message: |
+          💧 *Arrosage manuel terminé*
+          Zone : {{ zone }}
+          Durée : {{ (duration_sec / 60) | round(1) }} min
+          Volume réel : {{ vol_reel }} L
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.manual_irrigation
+
+
+###############################################################################
+# 5️⃣ SÉCURITÉ TROP-PLEIN CUVE — VIDANGE AUTOMATIQUE
+###############################################################################
+- id: irrigation_tank_overflow
+  alias: "🛢️ Sécurité Trop-Plein Cuve"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.tank_level_percent
+      above: 95
+
+  variables:
+    target_liters: 100
+
+  action:
+    - variables:
+        vol_initial: "{{ states('sensor.water_usage_total') | float(0) }}"
+
+    - service: switch.turn_on
+      target:
+        entity_id: switch.irrigation_zone_1
+
+    - service: switch.turn_on
+      target:
+        entity_id: switch.irrigation_pump
+
+    - repeat:
+        while:
+          - condition: template
+            value_template: >
+              {{
+                (states('sensor.water_usage_total') | float(0))
+                - vol_initial < target_liters
+              }}
+        sequence:
+          - delay: "00:00:10"
+
+          - choose:
+              - conditions:
+                  - condition: numeric_state
+                    entity_id: sensor.flow_rate
+                    below: 0.1
+                sequence:
+                  - service: notify.mobile_app
+                    data:
+                      message: "❌ Débit nul : arrêt sécurité (trop-plein)"
+                  - service: switch.turn_off
+                    target:
+                      entity_id:
+                        - switch.irrigation_zone_1
+                        - switch.irrigation_pump
+                  - stop: "Débit nul"
+
+    - service: switch.turn_off
+      target:
+        entity_id:
+          - switch.irrigation_zone_1
+          - switch.irrigation_pump
+
+    - variables:
+        vol_final: "{{ states('sensor.water_usage_total') | float(0) }}"
+        vol_reel: "{{ (vol_final - vol_initial) | round(1) }}"
+
+    - service: notify.mobile_app
+      data:
+        message: |
+          🛢️ *Trop-plein cuve évacué*
+          Volume évacué : {{ vol_reel }} L
+          Objectif : {{ target_liters }} L
+          Efficacité : {{ (vol_reel / target_liters * 100) | round(1) }} %
 
