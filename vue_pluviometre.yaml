@@ -1,0 +1,147 @@
+###############################################
+# 🌧️ Suivi Pluie & Pluviomètre – Home Assistant
+# Fichier générique pour GitHub
+# À adapter selon votre installation
+###############################################
+
+# ---------------------------
+# 1) Compteur de bascules du pluviomètre
+# ---------------------------
+sensor:
+  - platform: history_stats
+    name: Pluviomètre - Bascules
+    unique_id: pluviometre_bascules
+    entity_id: binary_sensor.pluviometre_contact
+    state: "off"
+    type: count
+    start: "{{ now().replace(hour=0, minute=0, second=0, microsecond=0) }}"
+    end: "{{ now() }}"
+
+# ---------------------------
+# 2) Pluie aujourd’hui (mm)
+# ---------------------------
+  - name: "🌧️ Pluie aujourd'hui"
+    unique_id: pluie_jour_mm
+    unit_of_measurement: "mm"
+    device_class: precipitation
+    state_class: total_increasing
+    state: >-
+      {% set bascules = states('sensor.pluviometre_bascules') | float(0) %}
+      {% set mm = bascules * 0.30303 %}
+      {{ mm | round(1) }}
+    availability: "{{ states('sensor.pluviometre_bascules') not in ['unknown','unavailable'] }}"
+
+# ---------------------------
+# 3) Pluie cette semaine (mm)
+# ---------------------------
+  - name: "🌦️ Pluie cette semaine"
+    unique_id: pluie_semaine_mm
+    unit_of_measurement: "mm"
+    device_class: precipitation
+    state: >-
+      {% set bascules = states('sensor.pluie_cette_semaine_brut') | float(0) %}
+      {{ (bascules * 0.30303) | round(2) }}
+
+# ---------------------------
+# 4) Pluie ce mois-ci (mm)
+# ---------------------------
+  - name: "🌧️ Pluie ce mois-ci"
+    unique_id: pluie_mois_mm
+    unit_of_measurement: "mm"
+    device_class: precipitation
+    state: >-
+      {% set bascules = states('sensor.pluie_ce_mois_brut') | float(0) %}
+      {{ (bascules * 0.30303) | round(2) }}
+
+# ---------------------------
+# 5) Pluie cette année (mm)
+# ---------------------------
+  - name: "☔ Pluie cette année"
+    unique_id: pluie_annee_mm
+    unit_of_measurement: "mm"
+    device_class: precipitation
+    state: >-
+      {% set bascules = states('sensor.pluie_cette_annee_brut') | float(0) %}
+      {{ (bascules * 0.30303) | round(2) }}
+
+# ---------------------------
+# 6) Intensité de pluie (mm/h)
+# ---------------------------
+  - name: "💧 Intensité pluie"
+    unique_id: intensite_pluie_mm_h
+    unit_of_measurement: "mm/h"
+    device_class: precipitation_intensity
+    state_class: measurement
+    state: >-
+      {% set current = states('sensor.pluie_jour_mm') | float(0) %}
+      {% set last = this.attributes.last_value | default(current) | float %}
+      {% set last_time = this.attributes.last_time | default((now().timestamp() - 300)) | float %}
+      {% set dt = now().timestamp() - last_time %}
+      {% set diff = current - last %}
+
+      {% if diff > 0 and dt > 0 %}
+        {{ (diff / dt * 3600) | round(2) }}
+      {% elif dt > 600 %}
+        0
+      {% else %}
+        {{ this.state | float(0) }}
+      {% endif %}
+    attributes:
+      last_value: "{{ states('sensor.pluie_jour_mm') }}"
+      last_time: "{{ now().timestamp() }}"
+
+# ---------------------------
+# 7) Type de pluie (text)
+# ---------------------------
+  - name: "🌧️ Type de pluie"
+    unique_id: type_de_pluie
+    state: >-
+      {% set i = states('sensor.intensite_pluie') | float(0) %}
+      {% if i == 0 %} Aucune pluie
+      {% elif i < 1 %} Pluie faible
+      {% elif i < 4 %} Pluie modérée
+      {% elif i < 10 %} Pluie forte
+      {% elif i < 30 %} Pluie très forte
+      {% else %} Pluie torrentielle
+      {% endif %}
+    icon: >-
+      {% set i = states('sensor.intensite_pluie') | float(0) %}
+      {% if i == 0 %}
+      mdi:weather-sunny
+      {% elif i < 1 %}
+      mdi:weather-partly-rainy
+      {% elif i < 4 %}
+      mdi:weather-rainy
+      {% elif i < 10 %}
+      mdi:weather-pouring
+      {% else %}
+      mdi:weather-lightning-rainy
+      {% endif %}
+
+# ---------------------------
+# 8) Tendance de pluie (trend sensor)
+# ---------------------------
+trend:
+  sensors:
+    pluie_tendance:
+      entity_id: sensor.pluie_jour_mm
+      max_samples: 2
+      sample_duration: 300
+      min_gradient: 0.0001
+      device_class: moisture
+      unique_id: pluie_tendance
+
+# ---------------------------
+# 9) Tendance corrigée (anti-bug pluvio)
+# ---------------------------
+binary_sensor:
+  - name: "📊 Tendance pluie corrigée"
+    unique_id: tendance_pluie_corrigee
+    state: >-
+      {% set last = as_timestamp(states.sensor.pluie_jour_mm.last_changed,0) %}
+      {% if (now().timestamp() - last) > 600 %}
+        off
+      {% else %}
+        {{ states('binary_sensor.pluie_tendance') }}
+      {% endif %}
+
