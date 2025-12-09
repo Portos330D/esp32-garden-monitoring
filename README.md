@@ -146,3 +146,64 @@ switch:
     turn_off_action:
       - ble.disable:
     restore_mode: ALWAYS_OFF
+
+🎯 Calibration du débitmètre (méthode générique)
+
+1. Faire passer 5 litres réels dans un récipient gradué.  
+2. Noter le nombre de pulses mesurés.  
+3. Calculer :
+
+pulses_par_litre = pulses_mesurés / litres
+
+4. Modifier la ligne du YAML :
+
+return p / pulses_par_litre;
+
+---
+
+🎯 Calibration humidité du sol (méthode générique)
+
+1. Mesurer la tension dans du terreau sec.  
+2. Mesurer la tension dans du terreau 100% humide.  
+3. Adapter la formule :
+
+return (v - tension_humide) * 100 / (tension_sec - tension_humide);
+
+---
+
+🧪 Exemple d’utilisation dans Home Assistant
+
+Représentation recommandée :
+
+- Graphique d’humidité du sol  
+- Courbe de température air / sol / eau  
+- Suivi du volume pompé  
+- Automatisation d’arrosage basée sur un seuil du sol  
+
+---
+
+📦 Partage GitHub
+
+Ce README est prêt pour être placé dans un dépôt public GitHub.  
+Ajoutez-y :
+
+- `/esphome/capteurs-jardin.yaml`  
+- Des schémas ou photos (optionnel)  
+- Une section “Issues” pour aider les utilisateurs  
+
+---
+
+🤝 Contributions
+
+Les utilisateurs peuvent :
+
+- Adapter les GPIO  
+- Ajouter des sondes  
+- Modifier les filtres  
+- Ouvrir des issues ou PR  
+
+---
+
+📝 Licence
+
+Libre d’utilisation et de modification.
